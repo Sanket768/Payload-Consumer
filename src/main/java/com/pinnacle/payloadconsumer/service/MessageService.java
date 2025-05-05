@@ -1,88 +1,18 @@
-package com.pinnacle.payloadconsumer.service;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
-
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-
-@Service
-public class MessageService {
-
-    @PersistenceContext
-    private EntityManager entityManager;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
-
-    @Transactional
-    public void saveMessage(String wabanumber, String logData, String messageId, String payload) {
-        try {
-            // Parse payload and extract display_phone_number
-            JsonNode rootNode = objectMapper.readTree(payload);
-            JsonNode displayPhoneNode = rootNode.path("entry").get(0)
-                    .path("changes").get(0)
-                    .path("value")
-                    .path("metadata")
-                    .path("display_phone_number");
-
-            if (displayPhoneNode.isMissingNode()) {
-                throw new MessageSavingException("display_phone_number not found in payload", null);
-            }
-
-            String displayPhone = displayPhoneNode.asText();
-            displayPhone = displayPhone.replaceAll("\\D", ""); // sanitize, keep digits only
-
-            String currentDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-            String tableName = "wa_" + displayPhone + "_" + currentDate;
-
-            String createTableSQL = String.format(
-                    "CREATE TABLE IF NOT EXISTS %s (" +
-                            "sr_no BIGINT AUTO_INCREMENT PRIMARY KEY, " +
-                            "wabanumber varchar(255), " +
-                            "log_data VARCHAR(255), " +
-                            "message_id VARCHAR(255), " +
-                            "payload TEXT)", tableName);
-
-            entityManager.createNativeQuery(createTableSQL).executeUpdate();
-
-            String insertSQL = String.format(
-                    "INSERT INTO %s (wabanumber, log_data, message_id, payload) VALUES (?, ?, ?, ?)", tableName);
-
-            entityManager.createNativeQuery(insertSQL)
-                    .setParameter(1, wabanumber)
-                    .setParameter(2, logData)
-                    .setParameter(3, messageId)
-                    .setParameter(4, payload)
-                    .executeUpdate();
-        } catch (Exception e) {
-            throw new MessageSavingException("Error saving message to the database", e);
-        }
-    }
-
-    public static class MessageSavingException extends RuntimeException {
-        public MessageSavingException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-}
-//
 //package com.pinnacle.payloadconsumer.service;
 //
 //import com.fasterxml.jackson.databind.JsonNode;
 //import com.fasterxml.jackson.databind.ObjectMapper;
+//import com.pinnacle.payloadconsumer.dto.MessageDto;
 //import jakarta.persistence.EntityManager;
 //import jakarta.persistence.PersistenceContext;
-//import jakarta.transaction.Transactional;
 //import org.springframework.stereotype.Service;
+//import org.springframework.transaction.annotation.Transactional;
 //
 //import java.time.LocalDate;
 //import java.time.format.DateTimeFormatter;
-//import java.util.ArrayList;
-//import java.util.List;
+//import java.util.*;
+//import java.util.concurrent.ConcurrentHashMap;
+//import java.util.stream.Collectors;
 //
 //@Service
 //public class MessageService {
@@ -91,88 +21,156 @@ public class MessageService {
 //    private EntityManager entityManager;
 //
 //    private final ObjectMapper objectMapper = new ObjectMapper();
-//
-//    private static final int BATCH_SIZE = 50;
-//
-//    private final ThreadLocal<List<Object[]>> batchCache = ThreadLocal.withInitial(ArrayList::new);
-//    private final ThreadLocal<String> currentTable = new ThreadLocal<>();
+//    private static final ConcurrentHashMap<String, Boolean> tableCache = new ConcurrentHashMap<>();
 //
 //    @Transactional
-//    public void saveMessage(String wabanumber, String logData, String messageId, String payload) {
-//        try {
-//            // Extract display_phone_number from payload
-//            JsonNode rootNode = objectMapper.readTree(payload);
-//            JsonNode displayPhoneNode = rootNode.path("entry").get(0)
-//                    .path("changes").get(0)
-//                    .path("value")
-//                    .path("metadata")
-//                    .path("display_phone_number");
+//    public void saveMessages(List<MessageDto> messages) {
+//        Map<String, List<MessageDto>> grouped = new HashMap<>();
 //
-//            if (displayPhoneNode.isMissingNode()) {
-//                throw new MessageSavingException("display_phone_number not found in payload", null);
+//        for (MessageDto dto : messages) {
+//            try {
+//                JsonNode rootNode = objectMapper.readTree(dto.getPayload());
+//                JsonNode displayPhoneNode = rootNode.path("entry").get(0)
+//                        .path("changes").get(0)
+//                        .path("value")
+//                        .path("metadata")
+//                        .path("display_phone_number");
+//
+//                if (displayPhoneNode.isMissingNode()) continue;
+//
+//                String displayPhone = displayPhoneNode.asText().replaceAll("\\D", ""); // sanitize
+//
+//                grouped.computeIfAbsent(displayPhone, k -> new ArrayList<>()).add(dto);
+//
+//            } catch (Exception e) {
 //            }
+//        }
 //
-//            String displayPhone = displayPhoneNode.asText().replaceAll("\\D", "");
-//            String currentDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+//        String currentDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+//
+//        for (Map.Entry<String, List<MessageDto>> entry : grouped.entrySet()) {
+//            String displayPhone = entry.getKey();
 //            String tableName = "wa_" + displayPhone + "_" + currentDate;
 //
-//            createTableIfNotExists(tableName);
-//
-//            List<Object[]> batch = batchCache.get();
-//            batch.add(new Object[]{wabanumber, logData, messageId, payload});
-//            currentTable.set(tableName);
-//
-//            if (batch.size() >= BATCH_SIZE) {
-//                flushBatch();
+//            if (!tableCache.containsKey(tableName)) {
+//                String createTableSQL = String.format(
+//                        "CREATE TABLE IF NOT EXISTS %s (" +
+//                                "sr_no BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+//                                "wabanumber VARCHAR(255), " +
+//                                "log_data VARCHAR(255), " +
+//                                "message_id VARCHAR(255), " +
+//                                "payload TEXT)", tableName);
+//                entityManager.createNativeQuery(createTableSQL).executeUpdate();
+//                tableCache.put(tableName, true);
 //            }
 //
-//        } catch (Exception e) {
-//            throw new MessageSavingException("Error saving message to the database", e);
-//        }
-//    }
+//            String insertSQL = String.format(
+//                    "INSERT INTO %s (wabanumber, log_data, message_id, payload) VALUES (?, ?, ?, ?)", tableName);
 //
-//    @Transactional
-//    public void flushBatch() {
-//        List<Object[]> batch = batchCache.get();
-//        String tableName = currentTable.get();
-//
-//        if (batch.isEmpty() || tableName == null) return;
-//
-//        StringBuilder sb = new StringBuilder("INSERT INTO " + tableName +
-//                " (wabanumber, log_data, message_id, payload) VALUES ");
-//
-//        for (int i = 0; i < batch.size(); i++) {
-//            sb.append("(?, ?, ?, ?)");
-//            if (i < batch.size() - 1) sb.append(", ");
-//        }
-//
-//        var query = entityManager.createNativeQuery(sb.toString());
-//        int index = 1;
-//        for (Object[] row : batch) {
-//            for (Object col : row) {
-//                query.setParameter(index++, col);
+//            for (MessageDto dto : entry.getValue()) {
+//                entityManager.createNativeQuery(insertSQL)
+//                        .setParameter(1, dto.getWabanumber())
+//                        .setParameter(2, dto.getLogData())
+//                        .setParameter(3, dto.getMessageId())
+//                        .setParameter(4, dto.getPayload())
+//                        .executeUpdate();
 //            }
-//        }
-//
-//        query.executeUpdate();
-//        batch.clear();
-//        currentTable.remove();
-//    }
-//
-//    private void createTableIfNotExists(String tableName) {
-//        String createTableSQL = String.format(
-//                "CREATE TABLE IF NOT EXISTS %s (" +
-//                        "sr_no BIGINT AUTO_INCREMENT PRIMARY KEY, " +
-//                        "wabanumber varchar(255), " +
-//                        "log_data VARCHAR(255), " +
-//                        "message_id VARCHAR(255), " +
-//                        "payload TEXT)", tableName);
-//        entityManager.createNativeQuery(createTableSQL).executeUpdate();
-//    }
-//
-//    public static class MessageSavingException extends RuntimeException {
-//        public MessageSavingException(String message, Throwable cause) {
-//            super(message, cause);
 //        }
 //    }
 //}
+
+package com.pinnacle.payloadconsumer.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pinnacle.payloadconsumer.dto.MessageDto;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+@Service
+public class MessageService {
+
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private static final ConcurrentHashMap<String, Boolean> tableCache = new ConcurrentHashMap<>();
+
+    @Transactional
+    public void saveMessages(List<MessageDto> messages) {
+        Map<String, List<MessageDto>> grouped = new HashMap<>();
+        for (MessageDto dto : messages) {
+            try {
+                JsonNode rootNode = objectMapper.readTree(dto.getPayload());
+                JsonNode valueNode = rootNode.path("entry").get(0)
+                        .path("changes").get(0)
+                        .path("value");
+
+                // Extract display_phone_number
+                String displayPhone = valueNode.path("metadata").path("display_phone_number").asText("").replaceAll("\\D", "");
+                if (displayPhone.isEmpty()) continue;
+
+                // Extract message_id from either statuses or messages
+                String messageId = "";
+                JsonNode statusesNode = valueNode.path("statuses");
+                JsonNode messagesNode = valueNode.path("messages");
+
+                if (statusesNode.isArray() && statusesNode.size() > 0) {
+                    messageId = statusesNode.get(0).path("id").asText("");
+                } else if (messagesNode.isArray() && messagesNode.size() > 0) {
+                    messageId = messagesNode.get(0).path("id").asText("");
+                }
+
+                // Set extracted values to DTO
+                dto.setWabanumber(displayPhone);
+                dto.setMessageId(messageId);
+                dto.setLogData(LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss")));
+
+                // Grouping for table
+                grouped.computeIfAbsent(displayPhone, k -> new ArrayList<>()).add(dto);
+
+            } catch (Exception e) {
+                e.printStackTrace(); // Always log parsing issues
+            }
+        }
+
+        String currentDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+        for (Map.Entry<String, List<MessageDto>> entry : grouped.entrySet()) {
+            String displayPhone = entry.getKey();
+            String tableName = "wa_" + displayPhone + "_" + currentDate;
+
+            if (!tableCache.containsKey(tableName)) {
+                String createTableSQL = String.format(
+                        "CREATE TABLE IF NOT EXISTS %s (" +
+                                "sr_no BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+                                "wabanumber VARCHAR(255), " +
+                                "log_data VARCHAR(255), " +
+                                "message_id VARCHAR(255), " +
+                                "payload TEXT)", tableName);
+                entityManager.createNativeQuery(createTableSQL).executeUpdate();
+                tableCache.put(tableName, true);
+            }
+
+            String insertSQL = String.format(
+                    "INSERT INTO %s (wabanumber, log_data, message_id, payload) VALUES (?, ?, ?, ?)", tableName);
+
+            for (MessageDto dto : entry.getValue()) {
+                entityManager.createNativeQuery(insertSQL)
+                        .setParameter(1, dto.getWabanumber())
+                        .setParameter(2, dto.getLogData())
+                        .setParameter(3, dto.getMessageId())
+                        .setParameter(4, dto.getPayload())
+                        .executeUpdate();
+            }
+        }
+    }
+}
