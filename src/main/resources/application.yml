@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: Payload-Consumer
+
+  kafka:
+    consumer:
+      bootstrap-servers: localhost:9092
+      group-id: your_group_id
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      poll-timeout: 1000
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/production
+    username: root
+    password: PTSPL123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+
+  jpa:
+    database-platform: org.hibernate.dialect.MySQLDialect
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+
+server:
+  port: 9999

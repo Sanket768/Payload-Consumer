@@ -9,5 +9,4 @@ class PayloadConsumerApplicationTests {
 	@Test
 	void contextLoads() {
 	}
-
 }
